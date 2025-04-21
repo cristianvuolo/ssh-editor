@@ -32,15 +32,13 @@ const App = () => {
   };
 
   const handleEdit = (config) => {
-    // Inicializa campos opcionais com string vazia se não existirem
-    const editConfig = {
+    setEditingConfig({
       ...config,
-      identityFile: config.identityFile || '',
-      port: config.port || '',
+      originalHost: config.host,
+      port: config.port || '22',
       forwardAgent: config.forwardAgent || 'no',
       proxyJump: config.proxyJump || ''
-    };
-    setEditingConfig(editConfig);
+    });
     setIsAddingNew(false);
   };
 
@@ -66,7 +64,12 @@ const App = () => {
   };
 
   const handleSave = async (updatedConfig) => {
-    // Limpa campos opcionais vazios
+    // Certifica que temos todos os campos obrigatórios
+    if (!updatedConfig.host || !updatedConfig.hostName || !updatedConfig.user) {
+      console.error('Missing required fields');
+      return;
+    }
+
     const cleanConfig = {
       ...updatedConfig,
       identityFile: updatedConfig.identityFile?.trim() || undefined,
@@ -75,9 +78,9 @@ const App = () => {
       proxyJump: updatedConfig.proxyJump?.trim() || undefined
     };
 
-    // Remove campos com valor 'undefined'
+    // Remove campos com valor undefined ou vazio e o campo originalHost
     Object.keys(cleanConfig).forEach(key => {
-      if (cleanConfig[key] === 'undefined' || cleanConfig[key] === '') {
+      if (cleanConfig[key] === undefined || cleanConfig[key] === '' || key === 'originalHost') {
         delete cleanConfig[key];
       }
     });
@@ -86,12 +89,20 @@ const App = () => {
     if (isAddingNew) {
       newConfigs = [...configs, cleanConfig];
     } else {
-      newConfigs = configs.map(c => c.host === cleanConfig.host ? cleanConfig : c);
+      // Atualiza a configuração existente usando o host original como referência
+      newConfigs = configs.map(c => 
+        c.host === updatedConfig.originalHost ? cleanConfig : c
+      );
     }
-    setConfigs(newConfigs);
-    setEditingConfig(null);
-    setIsAddingNew(false);
-    await saveConfigs(newConfigs);
+
+    try {
+      await saveConfigs(newConfigs);
+      setConfigs(newConfigs);
+      setEditingConfig(null);
+      setIsAddingNew(false);
+    } catch (error) {
+      console.error('Error saving configuration:', error);
+    }
   };
 
   const handleAddNew = () => {
@@ -100,7 +111,7 @@ const App = () => {
       hostName: '',
       user: '',
       identityFile: '',
-      port: '',
+      port: '22',
       forwardAgent: 'no',
       proxyJump: ''
     });
@@ -116,14 +127,23 @@ const App = () => {
   };
 
   const filteredConfigs = useMemo(() => {
-    if (!searchTerm) return configs;
+    if (!searchTerm) {
+      // Remove duplicados mesmo quando não há busca
+      return configs.filter((config, index, self) => 
+        index === self.findIndex(c => c.host === config.host)
+      );
+    }
+    
     const searchLower = searchTerm.toLowerCase();
     return configs
       .filter((config, index, self) => 
+        // Remove duplicados primeiro
         index === self.findIndex(c => c.host === config.host) &&
+        // Depois aplica o filtro de busca
         (config.host?.toLowerCase().includes(searchLower) ||
          config.hostName?.toLowerCase().includes(searchLower) ||
-         config.user?.toLowerCase().includes(searchLower))
+         config.user?.toLowerCase().includes(searchLower) ||
+         config.proxyJump?.toLowerCase().includes(searchLower))
       );
   }, [configs, searchTerm]);
 
@@ -300,12 +320,12 @@ const App = () => {
                       placeholder="Optional"
                     />
                   </div>
-                  <div>
-                    <label className="block mb-2 text-gray-300">ForwardAgent</label>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Forward Agent</label>
                     <select
-                      value={editingConfig.forwardAgent || 'no'}
+                      className="w-full bg-gray-700 text-white rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={editingConfig.forwardAgent}
                       onChange={(e) => setEditingConfig({ ...editingConfig, forwardAgent: e.target.value })}
-                      className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-gray-200"
                     >
                       <option value="yes">Yes</option>
                       <option value="no">No</option>

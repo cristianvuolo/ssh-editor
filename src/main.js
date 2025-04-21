@@ -44,6 +44,8 @@ function parseSSHConfig(content) {
         case 'proxyjump':
           currentConfig.proxyJump = value;
           break;
+        default:
+          currentConfig[key.toLowerCase()] = value;
       }
     }
   }
