@@ -32,7 +32,15 @@ const App = () => {
   };
 
   const handleEdit = (config) => {
-    setEditingConfig(config);
+    // Inicializa campos opcionais com string vazia se não existirem
+    const editConfig = {
+      ...config,
+      identityFile: config.identityFile || '',
+      port: config.port || '',
+      forwardAgent: config.forwardAgent || 'no',
+      proxyJump: config.proxyJump || ''
+    };
+    setEditingConfig(editConfig);
     setIsAddingNew(false);
   };
 
@@ -58,11 +66,27 @@ const App = () => {
   };
 
   const handleSave = async (updatedConfig) => {
+    // Limpa campos opcionais vazios
+    const cleanConfig = {
+      ...updatedConfig,
+      identityFile: updatedConfig.identityFile?.trim() || undefined,
+      port: updatedConfig.port || undefined,
+      forwardAgent: updatedConfig.forwardAgent === 'no' ? undefined : updatedConfig.forwardAgent,
+      proxyJump: updatedConfig.proxyJump?.trim() || undefined
+    };
+
+    // Remove campos com valor 'undefined'
+    Object.keys(cleanConfig).forEach(key => {
+      if (cleanConfig[key] === 'undefined' || cleanConfig[key] === '') {
+        delete cleanConfig[key];
+      }
+    });
+
     let newConfigs;
     if (isAddingNew) {
-      newConfigs = [...configs, updatedConfig];
+      newConfigs = [...configs, cleanConfig];
     } else {
-      newConfigs = configs.map(c => c.host === updatedConfig.host ? updatedConfig : c);
+      newConfigs = configs.map(c => c.host === cleanConfig.host ? cleanConfig : c);
     }
     setConfigs(newConfigs);
     setEditingConfig(null);
@@ -83,19 +107,23 @@ const App = () => {
     setIsAddingNew(true);
   };
 
+  const handleOpenTerminal = async (host) => {
+    try {
+      await ipcRenderer.invoke('open-terminal', host);
+    } catch (error) {
+      console.error('Error opening terminal:', error);
+    }
+  };
+
   const filteredConfigs = useMemo(() => {
     if (!searchTerm) return configs;
     const searchLower = searchTerm.toLowerCase();
-    // Remove duplicates using host as unique identifier and filter by search term
     return configs
       .filter((config, index, self) => 
-        // Remove duplicates
         index === self.findIndex(c => c.host === config.host) &&
-        // Search in all relevant fields
         (config.host?.toLowerCase().includes(searchLower) ||
          config.hostName?.toLowerCase().includes(searchLower) ||
-         config.user?.toLowerCase().includes(searchLower) ||
-         config.proxyJump?.toLowerCase().includes(searchLower))
+         config.user?.toLowerCase().includes(searchLower))
       );
   }, [configs, searchTerm]);
 
@@ -144,6 +172,15 @@ const App = () => {
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-medium text-gray-200">{config.host}</h2>
                   <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleOpenTerminal(config.host)}
+                      className="text-green-400 hover:text-green-300 p-1"
+                      title="Open in Terminal"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </button>
                     <button
                       onClick={() => handleEdit(config)}
                       className="text-blue-400 hover:text-blue-300 p-1"

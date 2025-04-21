@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const os = require('os');
+const { exec } = require('child_process');
 
 const configPath = path.join(os.homedir(), '.ssh', 'config');
 console.log('SSH config path:', configPath);
@@ -209,29 +210,74 @@ ipcMain.handle('save-configs', async (event, configs) => {
         foundFirstHost = true;
         break;
       }
-      globalConfig.push(line);
+      if (line.trim()) { // Só adiciona linhas não vazias
+        globalConfig.push(line);
+      }
+    }
+
+    // Remove linhas em branco extras do final do globalConfig
+    while (globalConfig.length > 0 && !globalConfig[globalConfig.length - 1].trim()) {
+      globalConfig.pop();
     }
 
     // Gera o conteúdo das configurações de host com indentação correta
     const hostConfigs = configs.map(config => {
+      // Filtra campos vazios ou undefined
       const entries = Object.entries(config)
-        .filter(([key]) => key !== 'host')
+        .filter(([key, value]) => {
+          if (key === 'host') return false; // Host é tratado separadamente
+          // Remove campos vazios, undefined, ou null
+          return value !== undefined && value !== null && value !== '';
+        })
         .map(([key, value]) => `    ${key} ${value}`)
         .join('\n');
+      
       return `Host ${config.host}\n${entries}`;
     }).join('\n\n');
 
     // Combina as configurações globais com as configurações de host
+    // Adiciona apenas uma linha em branco entre o cabeçalho e as configurações
     const newContent = [
       ...globalConfig,
-      ...(globalConfig.length > 0 ? [''] : []),
+      globalConfig.length > 0 ? '\n' : '',
       hostConfigs
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
-    await fs.writeFile(configPath, newContent);
+    await fs.writeFile(configPath, newContent + '\n'); // Garante uma nova linha no final do arquivo
     return true;
   } catch (error) {
     console.error('Error saving SSH config:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('open-terminal', async (event, host) => {
+  try {
+    const platform = process.platform;
+    let command;
+
+    switch (platform) {
+      case 'darwin': // macOS
+        command = `osascript -e 'tell application "Terminal" to do script "ssh ${host}"'`;
+        break;
+      case 'win32': // Windows
+        command = `start cmd /K "ssh ${host}"`;
+        break;
+      default: // Linux and others
+        command = `x-terminal-emulator -e "ssh ${host}"`;
+        break;
+    }
+
+    exec(command, (error) => {
+      if (error) {
+        console.error('Error opening terminal:', error);
+        return false;
+      }
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error opening terminal:', error);
     return false;
   }
 }); 
