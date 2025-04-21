@@ -1,9 +1,10 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs/promises');
 const os = require('os');
 
 const configPath = path.join(os.homedir(), '.ssh', 'config');
+console.log('SSH config path:', configPath);
 
 function parseSSHConfig(content) {
   const configs = [];
@@ -82,8 +83,7 @@ function createWindow() {
     height: 800,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false,
-      enableRemoteModule: true
+      contextIsolation: false
     }
   });
 
@@ -114,27 +114,121 @@ app.on('window-all-closed', () => {
 
 ipcMain.handle('load-configs', async () => {
   try {
-    if (!fs.existsSync(configPath)) {
-      console.log('Config file does not exist, creating empty file');
-      fs.writeFileSync(configPath, '');
-      return [];
+    let content;
+    try {
+      content = await fs.readFile(configPath, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        console.log('Config file does not exist, creating empty file');
+        await fs.writeFile(configPath, '');
+        return [];
+      }
+      throw error;
+    }
+    
+    const configs = [];
+    let currentConfig = null;
+    let inHostBlock = false;
+
+    const lines = content.split('\n');
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine || trimmedLine.startsWith('#')) continue;
+
+      // Verifica se é uma linha de Host (pode estar indentada)
+      if (trimmedLine.toLowerCase().startsWith('host ')) {
+        if (currentConfig) {
+          configs.push(currentConfig);
+        }
+        const host = trimmedLine.substring(5).trim();
+        currentConfig = { host };
+        inHostBlock = true;
+      } else if (inHostBlock) {
+        // Remove a indentação se existir
+        const cleanLine = line.trim();
+        const [key, ...valueParts] = cleanLine.split(/\s+/);
+        const value = valueParts.join(' ').trim();
+        
+        if (key && value) {
+          const normalizedKey = key.toLowerCase();
+          switch (normalizedKey) {
+            case 'hostname':
+              currentConfig.hostName = value;
+              break;
+            case 'user':
+              currentConfig.user = value;
+              break;
+            case 'identityfile':
+              currentConfig.identityFile = value;
+              break;
+            case 'port':
+              currentConfig.port = value;
+              break;
+            case 'forwardagent':
+              currentConfig.forwardAgent = value.toLowerCase();
+              break;
+            case 'proxyjump':
+              currentConfig.proxyJump = value;
+              break;
+            default:
+              currentConfig[normalizedKey] = value;
+          }
+        }
+      }
     }
 
-    const content = fs.readFileSync(configPath, 'utf-8');
-    console.log('Config file content:', content);
-    return parseSSHConfig(content);
+    // Adiciona a última configuração se existir
+    if (currentConfig && currentConfig.host) {
+      configs.push(currentConfig);
+    }
+
+    return configs;
   } catch (error) {
-    console.error('Error loading SSH config:', error);
+    console.error('Error reading SSH config:', error);
     return [];
   }
 });
 
 ipcMain.handle('save-configs', async (event, configs) => {
   try {
-    console.log('Saving configs:', configs);
-    const content = generateSSHConfig(configs);
-    console.log('Writing to config file:', content);
-    fs.writeFileSync(configPath, content);
+    // Lê o arquivo atual para preservar as configurações globais
+    let content = '';
+    try {
+      content = await fs.readFile(configPath, 'utf8');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    // Separa as configurações globais (antes do primeiro Host)
+    const lines = content.split('\n');
+    let globalConfig = [];
+    let foundFirstHost = false;
+
+    for (const line of lines) {
+      if (line.trim().toLowerCase().startsWith('host ')) {
+        foundFirstHost = true;
+        break;
+      }
+      globalConfig.push(line);
+    }
+
+    // Gera o conteúdo das configurações de host com indentação correta
+    const hostConfigs = configs.map(config => {
+      const entries = Object.entries(config)
+        .filter(([key]) => key !== 'host')
+        .map(([key, value]) => `    ${key} ${value}`)
+        .join('\n');
+      return `Host ${config.host}\n${entries}`;
+    }).join('\n\n');
+
+    // Combina as configurações globais com as configurações de host
+    const newContent = [
+      ...globalConfig,
+      ...(globalConfig.length > 0 ? [''] : []),
+      hostConfigs
+    ].join('\n');
+
+    await fs.writeFile(configPath, newContent);
     return true;
   } catch (error) {
     console.error('Error saving SSH config:', error);

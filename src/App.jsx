@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 const { ipcRenderer } = window.require('electron');
 
 const App = () => {
@@ -83,11 +83,25 @@ const App = () => {
     setIsAddingNew(true);
   };
 
-  const filteredConfigs = configs.filter(config => 
-    config.host.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    config.hostName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    config.user.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredConfigs = useMemo(() => {
+    if (!searchTerm) return configs;
+    const searchLower = searchTerm.toLowerCase();
+    // Remove duplicates using host as unique identifier and filter by search term
+    return configs
+      .filter((config, index, self) => 
+        // Remove duplicates
+        index === self.findIndex(c => c.host === config.host) &&
+        // Search in all relevant fields
+        (config.host?.toLowerCase().includes(searchLower) ||
+         config.hostName?.toLowerCase().includes(searchLower) ||
+         config.user?.toLowerCase().includes(searchLower) ||
+         config.proxyJump?.toLowerCase().includes(searchLower))
+      );
+  }, [configs, searchTerm]);
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4">
@@ -99,7 +113,7 @@ const App = () => {
               type="text"
               placeholder="Search hosts..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={handleSearchChange}
               className="bg-gray-800 text-gray-200 px-4 py-2 rounded-lg pl-10 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <svg
